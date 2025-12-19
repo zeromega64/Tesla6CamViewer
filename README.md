@@ -66,6 +66,9 @@ TeslaCam/
 └── ...
 ```
 
+![Uploading opera_bBnR5x5A6A.jpg…]()
+
+
 Clips are automatically grouped by their containing folder and sorted chronologically.
 
 ## Limitations & Tips
