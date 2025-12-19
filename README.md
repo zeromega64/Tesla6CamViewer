@@ -4,6 +4,8 @@ Tesla 6 Camera Viewer - Web Browser Viewer
 
 A simple, standalone, local web app for viewing Tesla Dashcam and Sentry Mode multi-camera recordings in your browser. No installation, no server, no data upload — everything runs locally.
 
+![screenshot_1](https://github.com/user-attachments/assets/be69ad17-7106-4be8-91e5-757cb582398b)
+
 ## Features
 
 - **Synchronized multi-camera playback**  
@@ -65,9 +67,6 @@ TeslaCam/
 ├── SavedClips_2025-12-18_...
 └── ...
 ```
-
-![Uploading opera_bBnR5x5A6A.jpg…]()
-
 
 Clips are automatically grouped by their containing folder and sorted chronologically.
 
