@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Steve's TeslaCam Viewer</title>
+<style>
+  body{margin:0;height:100vh;background:#000;color:#fff;font-family:system-ui;overflow:hidden;display:grid;grid-template-rows:auto 1fr auto}
+  .top{background:rgba(30,30,40,.98);backdrop-filter:blur(30px);padding:16px;display:flex;gap:16px;align-items:center;justify-content:center;flex-wrap:wrap;z-index:10;box-shadow:0 4px 30px #000}
+  select,button,label{padding:12px 20px;border-radius:16px;border:none;font-size:15px;cursor:pointer;transition:.25s}
+  select{background:#222;color:#fff;min-width:380px}
+  button{background:#8b5cf6;color:#fff;font-weight:600;box-shadow:0 4px 15px #0006}
+  button:hover{background:#a78bfa;transform:translateY(-2px)}
+  button:active{transform:translateY(1px)}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:14px;padding:14px}
+  .win{background:#000;border-radius:20px;overflow:hidden;box-shadow:0 10px 40px #000c;position:relative}
+  video{width:100%;height:100%;object-fit:cover;display:block}
+  .handle{position:absolute;top:0;left:0;right:0;height:44px;background:linear-gradient(#000c,transparent);color:#fff;font-weight:600;display:flex;align-items:center;justify-content:center;opacity:0;transition:.3s;cursor:move;z-index:2}
+  .win:hover .handle{opacity:1}
+  #mapBtn{position:fixed;bottom:32px;right:32px;width:76px;height:76px;background:#8b5cf6;border:none;border-radius:50%;color:#fff;font-size:34px;font-weight:bold;cursor:pointer;box-shadow:0 12px 40px #0008;z-index:999}
+  #mapBtn:disabled{background:#333;cursor:not-allowed}
+  #timeline{background:#222;height:60px;display:flex;align-items:center;padding:0 20px;gap:20px;font-size:18px;font-weight:600}
+  #progress{height:8px;background:#333;border-radius:4px;flex:1;position:relative;cursor:pointer}
+  #progressFill{height:100%;background:#8b5cf6;border-radius:4px;width:0;transition:width .1s}
+  #progressHandle{position:absolute;top:-6px;width:20px;height:20px;background:#8b5cf6;border-radius:50%;transform:translateX(-50%);display:none}
+  #progress:hover #progressHandle{display:block}
+  .back .blur-overlay{
+    position:absolute;
+    left:-40%;right:-40%;
+    bottom:-50%;
+    height:85%;
+    background:radial-gradient(ellipse at center top,#0000 12%,#000000ee 68%);
+    backdrop-filter:blur(30px);
+    pointer-events:none;
+    z-index:1;
+    border-radius:50%;
+  }
+  #eventInfo{
+    position:fixed;top:90px;left:20px;background:#000c;backdrop-filter:blur(14px);
+    padding:14px 20px;border-radius:16px;font-size:15px;line-height:1.6;z-index:999;
+    border:1px solid #444;max-width:360px;display:none;
+  }
+</style>
+</head>
+<body>
+
+<div class="top">
+  <label><input type="file" id="folder" webkitdirectory multiple style="display:none">Open TeslaCam Folder</label>
+  <select id="clips"><option>Select clip…</option></select>
+  <span id="title" style="font-size:1.5em;font-weight:bold;min-width:340px">No clip loaded</span>
+  <button onclick="toggleInfo()">Info</button>
+  <button onclick="rate(0.5)">0.5x</button>
+  <button onclick="rate(1)">1x</button>
+  <button onclick="rate(2)">2x</button>
+  <button onclick="rate(4)">4x</button>
+  <button onclick="prev()">Prev</button>
+  <button onclick="seek(-10)">-10s</button>
+  <button onclick="playPause()">Play/Pause</button>
+  <button onclick="seek(10)">+10s</button>
+  <button onclick="next()">Next</button>
+  <label><input type="checkbox" id="auto" checked> Auto</label>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div id="timeline">
+  <span id="currentTime">0:00</span>
+  <div id="progress">
+    <div id="progressFill"></div>
+    <div id="progressHandle"></div>
+  </div>
+  <span id="duration">--:--</span>
+</div>
+
+<div id="eventInfo"></div>
+<button id="mapBtn" disabled>Map</button>
+
+<script>
+const order = ["left_pillar","front","right_pillar","left_repeater","back","right_repeater"];
+order.forEach(cam => {
+  const div = document.createElement('div');
+  div.className = 'win' + (cam === 'back' ? ' back' : '');
+  div.innerHTML = `<div class="handle">${cam.replace('_',' ').toUpperCase()}</div><video class="${cam}"></video>`;
+  if (cam === 'back') {
+    const blur = document.createElement('div');
+    blur.className = 'blur-overlay';
+    div.appendChild(blur);
+  }
+  document.getElementById('grid').appendChild(div);
+});
+
+let carousel = [];
+let allFiles = [];
+let currentIndex = 0;
+let duration = 0;
+
+document.getElementById('folder').onchange = e => {
+  allFiles = Array.from(e.target.files);
+  const tcFiles = allFiles.filter(f => f.name.endsWith('-back.mp4'));
+  tcFiles.sort((a,b) => a.name.localeCompare(b.name));
+  carousel = tcFiles;
+
+  const sel = document.getElementById('clips');
+  sel.innerHTML = '<option value="-1">Select clip…</option>';
+  const folderMap = new Map();
+  tcFiles.forEach((f,i) => {
+    const parts = f.webkitRelativePath.split(/[\/\\]/);
+    const key = parts.slice(1,3).join(' to ');
+    if (!folderMap.has(key)) folderMap.set(key, i);
+  });
+  Array.from(folderMap.entries()).sort(([a],[b]) => a.localeCompare(b)).forEach(([key,i]) => {
+    sel.innerHTML += `<option value="${i}">${key}</option>`;
+  });
+
+  if (tcFiles.length) loadClip(0);
+};
+
+document.getElementById('clips').onchange = e => {
+  const i = +e.target.value;
+  if (i >= 0) loadClip(i);
+};
+
+function loadClip(i) {
+  currentIndex = i;
+  const file = carousel[i];
+  const folderPath = file.webkitRelativePath.substring(0, file.webkitRelativePath.lastIndexOf('/') + 1);
+  const base = folderPath + file.name.replace(/-back\.mp4$/i, '');
+
+  document.getElementById('title').textContent = folderPath.split(/[\/\\]/).slice(1).join(' to ');
+
+  order.forEach(cam => {
+    const v = document.querySelector(`video.${cam}`);
+    v.src = base + "-" + cam + ".mp4";
+    v.currentTime = 0;
+    v.controls = false;
+  });
+
+  const eventFile = allFiles.find(f => f.webkitRelativePath === folderPath + 'event.json');
+  const mapBtn = document.getElementById('mapBtn');
+  const info = document.getElementById('eventInfo');
+  mapBtn.disabled = true;
+  info.innerHTML = '';
+
+  if (eventFile) {
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const d = JSON.parse(r.result);
+        window.gps = d;
+        mapBtn.disabled = false;
+        const date = new Date(d.timestamp).toLocaleString();
+        info.innerHTML = `
+          ${date}<br>
+          ${d.city ? d.city + ' • ' : ''}${d.road_name || 'Unknown road'}<br>
+          ${d.reason.replace(/_/g,' ')} • ${d.event_type}
+        `;
+      } catch(e) {
+        info.innerHTML = 'Invalid event.json';
+      }
+    };
+    r.readAsText(eventFile);
+  } else {
+    info.innerHTML = 'No event.json';
+  }
+
+  setTimeout(() => {
+    document.querySelectorAll('video').forEach(v => v.play().catch(()=>{}));
+    const v = document.querySelector('video');
+    v.onloadedmetadata = () => {
+      duration = v.duration;
+      document.getElementById('duration').textContent = formatTime(duration);
+    };
+    v.ontimeupdate = updateTimeline;
+  }, 500);
+}
+
+function updateTimeline() {
+  const v = document.querySelector('video');
+  if (!v || isNaN(v.duration)) return;
+  const percent = (v.currentTime / v.duration) * 100;
+  document.getElementById('progressFill').style.width = percent + '%';
+  document.getElementById('currentTime').textContent = formatTime(v.currentTime);
+  document.getElementById('progressHandle').style.left = percent + '%';
+}
+
+document.getElementById('progress').onclick = e => {
+  const rect = e.target.getBoundingClientRect();
+  const pos = (e.clientX - rect.left) / rect.width;
+  document.querySelectorAll('video').forEach(v => v.currentTime = pos * duration);
+};
+
+function formatTime(secs) {
+  if (isNaN(secs)) return "0:00";
+  const m = Math.floor(secs/60);
+  const s = Math.floor(secs%60);
+  return `${m}:${s.toString().padStart(2,'0')}`;
+}
+
+document.getElementById('mapBtn').onclick = () => {
+  if (window.gps) {
+    open(`https://www.google.com/maps?q=${window.gps.est_lat},${window.gps.est_lon}&z=20&t=k`,'_blank');
+  }
+};
+
+function rate(r) { document.querySelectorAll('video').forEach(v=>v.playbackRate=r); }
+function playPause() {
+  const anyPlaying = Array.from(document.querySelectorAll('video')).some(v=>!v.paused);
+  document.querySelectorAll('video').forEach(v=> anyPlaying ? v.pause() : v.play());
+}
+function seek(s) { document.querySelectorAll('video').forEach(v=>v.currentTime+=s); }
+function next() { loadClip(currentIndex+1 < carousel.length ? currentIndex+1 : 0); }
+function prev() { loadClip(currentIndex-1 >= 0 ? currentIndex-1 : carousel.length-1); }
+
+function toggleInfo() {
+  const info = document.getElementById('eventInfo');
+  info.style.display = info.style.display === 'none' ? 'block' : 'none';
+}
+
+document.querySelectorAll('video').forEach(v => {
+  v.onclick = () => {
+    const t = v.currentTime;
+    document.querySelectorAll('video').forEach(v2 => v2.currentTime = t);
+  };
+  v.onended = () => {
+    if (document.getElementById('auto').checked) next();
+  };
+});
+</script>
+</body>
+</html>
